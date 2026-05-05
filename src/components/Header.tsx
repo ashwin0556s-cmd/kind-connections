@@ -1,25 +1,9 @@
-import { Link, useNavigate } from "react-router-dom";
-import { getCurrentUser, logout } from "@/lib/store";
-import { useState, useEffect } from "react";
+import { Link } from "react-router-dom";
 
 const Header = () => {
-  const [user, setUser] = useState(getCurrentUser());
-  const navigate = useNavigate();
-
-  useEffect(() => {
-    const interval = setInterval(() => setUser(getCurrentUser()), 500);
-    return () => clearInterval(interval);
-  }, []);
-
-  const handleLogout = () => {
-    logout();
-    setUser(null);
-    navigate("/");
-  };
-
   return (
     <header
-      className="flex items-center justify-between px-6 py-4 md:px-12"
+      className="flex items-center justify-between px-6 py-4 md:px-12 sticky top-0 z-50 backdrop-blur"
       style={{ background: "var(--header-gradient)" }}
     >
       <Link to="/" className="text-xl font-bold text-primary-foreground tracking-tight">
@@ -32,24 +16,9 @@ const Header = () => {
         <Link to="/forum" className="text-primary-foreground/90 hover:text-primary-foreground transition-opacity">
           Forum
         </Link>
-        {user ? (
-          <>
-            <Link to="/dashboard" className="text-primary-foreground/90 hover:text-primary-foreground transition-opacity">
-              Dashboard
-            </Link>
-            <button
-              onClick={handleLogout}
-              className="text-primary-foreground/90 hover:text-primary-foreground transition-opacity cursor-pointer bg-transparent border-none font-medium text-sm"
-              style={{ fontFamily: "inherit" }}
-            >
-              Logout
-            </button>
-          </>
-        ) : (
-          <Link to="/auth" className="text-primary-foreground/90 hover:text-primary-foreground transition-opacity">
-            Login
-          </Link>
-        )}
+        <span className="text-primary-foreground/60 cursor-not-allowed" title="Coming soon">
+          Pinned
+        </span>
       </nav>
     </header>
   );

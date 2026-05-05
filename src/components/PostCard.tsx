@@ -1,116 +1,114 @@
-import { useState } from "react";
-import { Post, getCurrentUser, likePost, hasLiked, deletePost, getComments, addComment } from "@/lib/store";
+import { useEffect, useState } from "react";
+import { motion, AnimatePresence } from "framer-motion";
+import { Post, Comment, addComment, subscribeComments } from "@/lib/forum";
+import { getDeviceId } from "@/lib/device";
 
-interface PostCardProps {
+interface Props {
   post: Post;
-  onUpdate: () => void;
+  trending?: boolean;
 }
 
-const PostCard = ({ post, onUpdate }: PostCardProps) => {
-  const user = getCurrentUser();
-  const [showComments, setShowComments] = useState(false);
-  const [comments, setComments] = useState(getComments(post.id));
-  const [commentText, setCommentText] = useState("");
-  const liked = hasLiked(post.id);
+const PostCard = ({ post, trending }: Props) => {
+  const [open, setOpen] = useState(false);
+  const [comments, setComments] = useState<Comment[]>([]);
+  const [text, setText] = useState("");
+  const [submitting, setSubmitting] = useState(false);
+  const myId = getDeviceId();
 
-  const handleLike = () => {
-    likePost(post.id);
-    onUpdate();
-  };
+  useEffect(() => {
+    if (!open) return;
+    const unsub = subscribeComments(post.id, setComments);
+    return () => unsub();
+  }, [open, post.id]);
 
-  const handleDelete = () => {
-    if (confirm("Delete post?")) {
-      deletePost(post.id);
-      onUpdate();
+  const handleAdd = async () => {
+    if (!text.trim() || submitting) return;
+    setSubmitting(true);
+    try {
+      await addComment(post.id, text);
+      setText("");
+    } catch (e) {
+      console.error(e);
+    } finally {
+      setSubmitting(false);
     }
   };
 
-  const handleComment = () => {
-    if (!commentText.trim()) return;
-    addComment(post.id, commentText.trim());
-    setCommentText("");
-    setComments(getComments(post.id));
-  };
-
-  const toggleComments = () => {
-    setShowComments(!showComments);
-    if (!showComments) setComments(getComments(post.id));
-  };
-
   return (
-    <div className="bg-card rounded-xl p-5 shadow-[0_5px_20px_rgba(0,0,0,0.06)] mb-5 animate-fade-up">
+    <motion.div
+      layout
+      initial={{ opacity: 0, y: 12 }}
+      animate={{ opacity: 1, y: 0 }}
+      className="bg-card rounded-xl p-5 shadow-[0_5px_20px_rgba(0,0,0,0.06)] mb-5 border border-border/50"
+    >
       <div className="flex items-center justify-between mb-3">
-        <span className="text-sm font-medium text-muted-foreground">👤 {post.userName}</span>
-        <span className="text-xs text-muted-foreground">
-          {new Date(post.createdAt).toLocaleString()}
+        <span className="text-xs font-medium text-muted-foreground">
+          👤 {post.deviceId === myId ? "You" : `Anon · ${post.deviceId.slice(0, 6)}`}
         </span>
-      </div>
-      <h3 className="font-semibold text-card-foreground mb-2">{post.title}</h3>
-      <p className="text-sm text-muted-foreground leading-relaxed mb-4">{post.content}</p>
-      <div className="flex flex-wrap gap-4 text-sm font-medium">
-        <button
-          onClick={handleLike}
-          className={`cursor-pointer transition-colors bg-transparent border-none font-medium text-sm ${liked ? "text-primary" : "text-muted-foreground hover:text-primary"}`}
-          style={{ fontFamily: "inherit" }}
-        >
-          {liked ? "♥" : "♡"} Like ({post.likeCount})
-        </button>
-        <button
-          onClick={toggleComments}
-          className="cursor-pointer text-muted-foreground hover:text-primary transition-colors bg-transparent border-none font-medium text-sm"
-          style={{ fontFamily: "inherit" }}
-        >
-          💬 Comment
-        </button>
-        {user?.uid === post.userId && (
-          <button
-            onClick={handleDelete}
-            className="cursor-pointer text-muted-foreground hover:text-destructive transition-colors bg-transparent border-none font-medium text-sm"
-            style={{ fontFamily: "inherit" }}
-          >
-            🗑 Delete
-          </button>
-        )}
-      </div>
-
-      {showComments && (
-        <div className="mt-4 pt-4 border-t border-border">
-          <div className="space-y-3 mb-3">
-            {comments.map(c => (
-              <div key={c.id} className="text-sm">
-                <strong className="text-card-foreground">{c.userName}:</strong>{" "}
-                <span className="text-muted-foreground">{c.text}</span>
-                <span className="text-xs text-muted-foreground ml-2">
-                  {new Date(c.createdAt).toLocaleString()}
-                </span>
-              </div>
-            ))}
-            {comments.length === 0 && (
-              <p className="text-sm text-muted-foreground">No comments yet.</p>
-            )}
-          </div>
-          {user && (
-            <div className="flex gap-2">
-              <input
-                type="text"
-                value={commentText}
-                onChange={e => setCommentText(e.target.value)}
-                onKeyDown={e => e.key === "Enter" && handleComment()}
-                placeholder="Write a comment..."
-                className="flex-1 px-3 py-2 rounded-lg border border-input bg-background text-sm focus:outline-none focus:ring-2 focus:ring-ring"
-              />
-              <button
-                onClick={handleComment}
-                className="px-4 py-2 rounded-lg text-primary-foreground text-sm font-medium border-none cursor-pointer active:scale-[0.97] transition-transform"
-                style={{ background: "var(--btn-gradient)" }}
-              >
-                ➤
-              </button>
-            </div>
+        <div className="flex items-center gap-2">
+          {trending && (
+            <span className="text-xs px-2 py-0.5 rounded-full bg-primary/10 text-primary font-semibold">
+              🔥 Trending
+            </span>
           )}
+          <span className="text-xs text-muted-foreground">
+            {post.createdAt ? new Date(post.createdAt).toLocaleString() : ""}
+          </span>
         </div>
-      )}
-    </div>
+      </div>
+      <p className="text-card-foreground whitespace-pre-wrap leading-relaxed mb-4">
+        {post.content}
+      </p>
+      <button
+        onClick={() => setOpen((o) => !o)}
+        className="text-sm text-muted-foreground hover:text-primary transition-colors bg-transparent border-none cursor-pointer font-medium"
+      >
+        💬 {post.commentCount} {post.commentCount === 1 ? "Comment" : "Comments"}
+      </button>
+
+      <AnimatePresence>
+        {open && (
+          <motion.div
+            initial={{ height: 0, opacity: 0 }}
+            animate={{ height: "auto", opacity: 1 }}
+            exit={{ height: 0, opacity: 0 }}
+            className="overflow-hidden"
+          >
+            <div className="mt-4 pt-4 border-t border-border space-y-3">
+              {comments.map((c) => (
+                <div key={c.id} className="text-sm bg-muted/50 rounded-lg p-2">
+                  <div className="text-xs text-muted-foreground mb-0.5">
+                    {c.deviceId === myId ? "You" : `Anon · ${c.deviceId.slice(0, 6)}`}
+                  </div>
+                  <div className="text-card-foreground">{c.content}</div>
+                </div>
+              ))}
+              {comments.length === 0 && (
+                <p className="text-sm text-muted-foreground">No comments yet.</p>
+              )}
+              <div className="flex gap-2 pt-2">
+                <input
+                  type="text"
+                  value={text}
+                  onChange={(e) => setText(e.target.value)}
+                  onKeyDown={(e) => e.key === "Enter" && handleAdd()}
+                  placeholder="Write a comment..."
+                  className="flex-1 px-3 py-2 rounded-lg border border-input bg-background text-sm focus:outline-none focus:ring-2 focus:ring-ring"
+                />
+                <button
+                  onClick={handleAdd}
+                  disabled={submitting}
+                  className="px-4 py-2 rounded-lg text-primary-foreground text-sm font-medium border-none cursor-pointer active:scale-[0.97] transition-transform disabled:opacity-50"
+                  style={{ background: "var(--btn-gradient)" }}
+                >
+                  ➤
+                </button>
+              </div>
+            </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+    </motion.div>
   );
 };
 
