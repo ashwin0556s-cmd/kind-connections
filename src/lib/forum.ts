@@ -1,14 +1,17 @@
 import { db } from "./firebase";
 import {
-  ref,
-  push,
-  set,
-  onValue,
-  runTransaction,
-  serverTimestamp,
+  collection,
+  addDoc,
+  doc,
+  onSnapshot,
   query,
-  orderByChild,
-} from "firebase/database";
+  orderBy,
+  where,
+  serverTimestamp,
+  increment,
+  updateDoc,
+  Timestamp,
+} from "firebase/firestore";
 import { getDeviceId } from "./device";
 
 export interface Post {
@@ -27,72 +30,82 @@ export interface Comment {
   deviceId: string;
 }
 
+const tsToMs = (v: any): number => {
+  if (!v) return 0;
+  if (v instanceof Timestamp) return v.toMillis();
+  if (typeof v?.toMillis === "function") return v.toMillis();
+  if (typeof v === "number") return v;
+  return 0;
+};
+
 export async function createPost(content: string) {
   const trimmed = content.trim();
   if (!trimmed) throw new Error("Empty post");
   const deviceId = getDeviceId();
-  const postRef = push(ref(db, "posts"));
-  await set(postRef, {
+  await addDoc(collection(db, "posts"), {
     content: trimmed,
     createdAt: serverTimestamp(),
     deviceId,
     commentCount: 0,
   });
-  await runTransaction(ref(db, "analytics/totalPosts"), (v) => (v || 0) + 1);
 }
 
 export async function addComment(postId: string, content: string) {
   const trimmed = content.trim();
   if (!trimmed) throw new Error("Empty comment");
   const deviceId = getDeviceId();
-  const cRef = push(ref(db, "comments"));
-  await set(cRef, {
+  await addDoc(collection(db, "comments"), {
     postId,
     content: trimmed,
     createdAt: serverTimestamp(),
     deviceId,
   });
-  await runTransaction(ref(db, `posts/${postId}/commentCount`), (v) => (v || 0) + 1);
-  await runTransaction(ref(db, "analytics/totalComments"), (v) => (v || 0) + 1);
+  await updateDoc(doc(db, "posts", postId), {
+    commentCount: increment(1),
+  });
 }
 
 export function subscribePosts(cb: (posts: Post[]) => void) {
-  const q = query(ref(db, "posts"), orderByChild("createdAt"));
-  return onValue(q, (snap) => {
-    const arr: Post[] = [];
-    snap.forEach((child) => {
-      const v = child.val();
-      arr.push({
-        id: child.key!,
-        content: v.content || "",
-        createdAt: v.createdAt || 0,
-        deviceId: v.deviceId || "",
-        commentCount: v.commentCount || 0,
+  const q = query(collection(db, "posts"), orderBy("createdAt", "desc"));
+  return onSnapshot(
+    q,
+    (snap) => {
+      const arr: Post[] = snap.docs.map((d) => {
+        const v = d.data() as any;
+        return {
+          id: d.id,
+          content: v.content || "",
+          createdAt: tsToMs(v.createdAt),
+          deviceId: v.deviceId || "",
+          commentCount: v.commentCount || 0,
+        };
       });
-    });
-    arr.sort((a, b) => b.createdAt - a.createdAt);
-    cb(arr);
-  });
+      cb(arr);
+    },
+    (err) => console.error("subscribePosts error", err)
+  );
 }
 
 export function subscribeComments(postId: string, cb: (comments: Comment[]) => void) {
-  return onValue(ref(db, "comments"), (snap) => {
-    const arr: Comment[] = [];
-    snap.forEach((child) => {
-      const v = child.val();
-      if (v.postId === postId) {
-        arr.push({
-          id: child.key!,
+  const q = query(collection(db, "comments"), where("postId", "==", postId));
+  return onSnapshot(
+    q,
+    (snap) => {
+      const arr: Comment[] = snap.docs.map((d) => {
+        const v = d.data() as any;
+        return {
+          id: d.id,
           postId: v.postId,
           content: v.content || "",
-          createdAt: v.createdAt || 0,
+          createdAt: tsToMs(v.createdAt),
           deviceId: v.deviceId || "",
-        });
-      }
-    });
-    arr.sort((a, b) => a.createdAt - b.createdAt);
-    cb(arr);
-  });
+        };
+      });
+      arr.sort((a, b) => a.createdAt - b.createdAt);
+      cb(arr);
+    },
+    (err) => console.error("subscribeComments error", err)
+  );
 }
 
 export interface Analytics {
@@ -102,13 +115,27 @@ export interface Analytics {
 }
 
 export function subscribeAnalytics(cb: (a: Analytics) => void) {
-  return onValue(ref(db, "analytics"), (snap) => {
-    const v = snap.val() || {};
-    const visitors = v.visitors ? Object.keys(v.visitors).length : 0;
-    cb({
-      visitors,
-      totalPosts: v.totalPosts || 0,
-      totalComments: v.totalComments || 0,
-    });
+  let visitors = 0;
+  let totalPosts = 0;
+  let totalComments = 0;
+  const emit = () => cb({ visitors, totalPosts, totalComments });
+
+  const u1 = onSnapshot(collection(db, "visitors"), (s) => {
+    visitors = s.size;
+    emit();
   });
+  const u2 = onSnapshot(collection(db, "posts"), (s) => {
+    totalPosts = s.size;
+    emit();
+  });
+  const u3 = onSnapshot(collection(db, "comments"), (s) => {
+    totalComments = s.size;
+    emit();
+  });
+
+  return () => {
+    u1();
+    u2();
+    u3();
+  };
 }
